@@ -9,83 +9,85 @@
 #import "ViewController.h"
 NSMutableArray*muArray=nil;
 NSInteger DataLengthLimit = 68750;
+#define  CHUNK_SIZE 128
 @implementation ViewController
+
+- (long long) fileSizeAtPath:(NSString*) filePath{
+    NSFileManager* manager = [NSFileManager defaultManager];
+    if ([manager fileExistsAtPath:filePath]){
+        return [[manager attributesOfItemAtPath:filePath error:nil] fileSize];
+    }
+    return 0;
+}
+
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
+    NSInteger valueSize = 0;
     muArray = [NSMutableArray array];
     NSString *path = @"/Users/apple/Movies";
     [self testPath:path];
     NSTimeInterval begin =  [[NSDate date]timeIntervalSince1970];
     NSMutableDictionary*mudict = [NSMutableDictionary dictionary];
-    NSData*data=nil;
     NSString*key = nil;
     for (NSString*pa in muArray) {
         NSAutoreleasePool *pool=[[NSAutoreleasePool alloc]init];
-        data = [NSData dataWithContentsOfFile:pa];
-        if (data) {
-            NSString*str = [self getStr:data];
-            if (str) {
-                key = [self md5:str];
-                if (key) {
-                    if (![mudict objectForKey:key]) {
-                        [mudict setObject:pa forKey:key];
-                    }else{
-                        NSLog(@"key=%@    (%@)==(%@)",key,[mudict objectForKey:key],pa);
-                    }
-                }else{
-                    NSLog(@"md5失败:%@",pa);
-                }
-
+        key = [self fileMD5:pa];
+        if (key) {
+            if (![mudict objectForKey:key]) {
+                [mudict setObject:pa forKey:key];
             }else{
-                NSLog(@"nsdata->nsstring 失败:%@",pa);
+                valueSize += [self fileSizeAtPath:pa];
+                NSLog(@"key=%@    (%@)==(%@)",key,[mudict objectForKey:key],pa);
             }
-            
         }else{
-            NSLog(@"读文件失败:%@",pa);
+            NSLog(@"md5失败:%@",pa);
         }
         [pool release];
         pool = nil;
     }
     NSTimeInterval diff =  [[NSDate date]timeIntervalSince1970] - begin;
     if (muArray && mudict) {
-        NSLog(@"搜索文件数:(%lu)  文件相同数:(%lu)  执行事件:(%f) ",(unsigned long)muArray.count,(muArray.count-[mudict allKeys].count),diff);
+        NSString*outMsg = [NSString stringWithFormat:@"搜索文件数:(%lu)  文件相同数:(%lu)  执行事件:(%f)  合并可节约（%ldM）",(unsigned long)muArray.count,(muArray.count-[mudict allKeys].count),diff,valueSize/(1024*1024)];
+        NSLog(@"%@",outMsg);
     }
     
 }
 
 
--(NSString*)getStr:(NSData*)data{
-    if (data.length < DataLengthLimit) {
-        NSString*str =  [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        if (str) {
-            return str;
-        }
+
+-(NSString*)fileMD5:(NSString*)path
+{
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:path];
+    if( handle== nil ) {
+        NSLog(@"ERROR GETTING FILE MD5");
+        return nil; // file didnt exist
     }
-    NSInteger diffIndex = sqrt(data.length);
-    NSString *newHexStr = [NSString stringWithFormat:@"%lu_",(unsigned long)data.length];///16进制数
-    Byte *bytes = (Byte *)[data bytes];
-    NSString *hexStr;
-    for(int i=0; i < diffIndex;i++){
-        hexStr = [NSString stringWithFormat:@"%x",bytes[i*i]];
-        newHexStr = [newHexStr stringByAppendingString:hexStr];
-        hexStr = nil;
+    CC_MD5_CTX md5;
+    
+    CC_MD5_Init(&md5);
+    NSData* fileData = nil;
+    BOOL done = NO;
+    while(!done)
+    {
+        fileData = [handle readDataOfLength: CHUNK_SIZE ];
+        CC_MD5_Update(&md5, [fileData bytes], (CC_LONG)[fileData length]);
+        if( [fileData length] == 0 ) done = YES;
     }
-    hexStr = [NSString stringWithFormat:@"%x",bytes[data.length-1]];
-    newHexStr = [newHexStr stringByAppendingString:hexStr];
-    return newHexStr;
+    unsigned char digest[CC_MD5_DIGEST_LENGTH];
+    CC_MD5_Final(digest, &md5);
+    NSString* s = [NSString stringWithFormat: @"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+                   digest[0], digest[1],
+                   digest[2], digest[3],
+                   digest[4], digest[5],
+                   digest[6], digest[7],
+                   digest[8], digest[9],
+                   digest[10], digest[11],
+                   digest[12], digest[13],
+                   digest[14], digest[15]];
+    return s;
 }
-#pragma mark MD5加密
--(NSString*)md5:(NSString*)value {
-    const char *cStr = [value UTF8String];
-    unsigned char digest[16];
-    CC_MD5( cStr, (CC_LONG)strlen(cStr), digest ); // This is the md5 call
-    NSMutableString *output = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
-    for(int i = 0; i < CC_MD5_DIGEST_LENGTH; i++)
-        [output appendFormat:@"%02x", digest[i]];
-    return  output;
-}
+
 
 -(void)testPath:(NSString*)path{
     NSArray *oggFiles = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:nil];
